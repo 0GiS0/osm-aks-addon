@@ -6,44 +6,32 @@ AKS_NAME="aks-osm"
 # Create resource group
 az group create --name $RESOURCE_GROUP --location $LOCATION
 
-# Create AKS
-# az aks create \
-# --resource-group $RESOURCE_GROUP \
-# --name $AKS_NAME \
-# --generate-ssh-keys
-
+# Create AKS cluster with Open Service Mesh enabled
 az aks create \
 --resource-group $RESOURCE_GROUP \
 --name $AKS_NAME \
+--node-vm-size Standard_B4ms \
 --enable-addons open-service-mesh \
---generate-ssh-keys
+--generate-ssh-keys 
 
 # Get credentials
 az aks get-credentials \
 --resource-group $RESOURCE_GROUP \
 --name $AKS_NAME
 
-# Download and install OSM command-line tool
-curl -L https://github.com/openservicemesh/osm/releases/download/v1.0.0/osm-v1.0.0-darwin-amd64.tar.gz | tar -vxzf -
+# Verify that the OSM add-on is installed on your cluster
+az aks show --resource-group $RESOURCE_GROUP --name $AKS_NAME  --query 'addonProfiles.openServiceMesh.enabled'
 
-# Export osm to the PATH
-export PATH=$PATH:./darwin-amd64/
-osm version
+# You can also verify the version, status, and configuration of the OSM mesh that's running on your cluster.
+kubectl get deployment -n kube-system osm-controller -o=jsonpath='{$.spec.template.spec.containers[:1].image}'
 
-# Install OMS on Kubernetes
-export osm_namespace=osm-system # Replace osm-system with the namespace where OSM will be installed
-export osm_mesh_name=osm # Replace osm with the desired OSM mesh name
+# Verify the status od the OSM components running on your cluster
+kubectl get deployments -n kube-system --selector app.kubernetes.io/name=openservicemesh.io
+kubectl get pods -n kube-system --selector app.kubernetes.io/name=openservicemesh.io
+kubectl get services -n kube-system --selector app.kubernetes.io/name=openservicemesh.io
 
-osm install \
---mesh-name "$osm_mesh_name" \
---osm-namespace "$osm_namespace" \
---set=osm.enablePermissiveTrafficPolicy=true \
---set=osm.deployPrometheus=true \
---set=osm.deployGrafana=true \
---set=osm.deployJaeger=true
-
-# Check OMS status
-kubectl get pods -n "$osm_namespace"
+# Verify the configuration of your OSM mesh, use kubectl get meshconfig
+kubectl get meshconfig osm-mesh-config -n kube-system -o yaml
 
 #############################
 # Deploy Sample application #
@@ -87,8 +75,22 @@ kubectl get services -n bookstore
 kubectl get services -n bookbuyer
 kubectl get services -n bookthief
 
+# Install osm cli (1.2.3)
+# Specify the OSM version that will be leveraged throughout these instructions
+OSM_VERSION=v1.2.3
+# macOS curl command only
+curl -sL "https://github.com/openservicemesh/osm/releases/download/$OSM_VERSION/osm-$OSM_VERSION-darwin-amd64.tar.gz" | tar -vxzf -
+
+# move the osm binary to your PATH
+sudo mv ./darwin-amd64/osm /usr/local/bin/osm
+
+osm version
+
 # Now we enable osm for their namespaces
 osm namespace add bookstore bookbuyer bookthief
+
+# Check if the namespace has the label openservicemesh.io/monitored-by=osm
+kubectl describe ns bookstore
 
 # Check what namespaces are monitored by osm
 osm namespace list
@@ -106,32 +108,38 @@ kubectl get pods -n bookthief
 kubectl describe pod -n bookstore 
 
 # We lost access from outside. We have to configure a Ingress Controller
+
 # Configure nginx ingress controller
 kubectl create ns ingress-nginx
+# osm namespace add ingress-nginx
+osm namespace add ingress-nginx
+# add ingress nginx helm repo
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo update
-
 helm install osm-nginx-ingess ingress-nginx/ingress-nginx --namespace ingress-nginx
 
-# osm namespace add ingress-nginx
-
 # Get nginx ingress controller public IP
-kubectl get svc -n ingress-nginx osm-nginx-ingess-ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+INGRESS_PUBLIC_IP=$(kubectl get svc -n ingress-nginx osm-nginx-ingess-ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
 # Create a ingress rules and ingress backends
 kubectl apply -f ingress/.
 
-# Now you can access using this URLs
-http://bookstore.<INGRESS_PUBLIC_IP>.nip.io/
-http://bookbuyer.<INGRESS_PUBLIC_IP>.nip.io/
-http://bookthief.<INGRESS_PUBLIC_IP>.nip.io/
+kubectl get ingressbackend -n bookstore
+kubectl describe ingressbackend -n bookstore
 
+# Now you can access using this URLs
+cat <<EOF
+http://bookstore.$INGRESS_PUBLIC_IP.nip.io/
+http://bookbuyer.$INGRESS_PUBLIC_IP.nip.io/
+http://bookthief.$INGRESS_PUBLIC_IP.nip.io/
+
+EOF
 
 # Check permissive mode
-kubectl get meshconfig osm-mesh-config -n osm-system -o jsonpath='{.spec.traffic.enablePermissiveTrafficPolicyMode}{"\n"}'
+kubectl get meshconfig osm-mesh-config -n kube-system -o jsonpath='{.spec.traffic.enablePermissiveTrafficPolicyMode}{"\n"}'
 
 # Change to permissive mode to false
-kubectl patch meshconfig osm-mesh-config -n osm-system -p '{"spec":{"traffic":{"enablePermissiveTrafficPolicyMode":false}}}'  --type=merge
+kubectl patch meshconfig osm-mesh-config -n kube-system -p '{"spec":{"traffic":{"enablePermissiveTrafficPolicyMode":false}}}'  --type=merge
 
 # Now you need to create traffic policies
 kubectl apply -f traffic-access/.
