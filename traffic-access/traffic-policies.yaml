@@ -20,7 +20,7 @@ spec:
     name: bookstore-service-routes
     matches:
     - buy-books
-    - steal-books
+    # - steal-books
 
 ---
 apiVersion: specs.smi-spec.io/v1alpha4

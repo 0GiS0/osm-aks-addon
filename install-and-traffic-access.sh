@@ -1,7 +1,7 @@
 # Variables
 RESOURCE_GROUP="open-service-mesh-demo"
-LOCATION="westeurope"
-AKS_NAME="aks-osm"
+LOCATION="northeurope"
+AKS_NAME="aks-osm-addon"
 
 # Create resource group
 az group create --name $RESOURCE_GROUP --location $LOCATION
@@ -33,34 +33,9 @@ kubectl get services -n kube-system --selector app.kubernetes.io/name=openservic
 # Verify the configuration of your OSM mesh, use kubectl get meshconfig
 kubectl get meshconfig osm-mesh-config -n kube-system -o yaml
 
-#############################
-# Deploy Sample application #
-#############################
-
-# Generate Docker images
-docker build -t 0gis0/bookstore bookstore/.
-docker build -t 0gis0/bookbuyer bookbuyer/.
-docker build -t 0gis0/bookthief bookthief/.
-
-docker images
-
-# Try to execute the app in Docker
-# Create a network for the containers
-docker network create bookstore-net
-
-# Create the containers
-docker run -d --name bookstore -p 8080:3000 --network bookstore-net 0gis0/bookstore 
-docker run -d --name bookbuyer -p 8081:4000 --network bookstore-net 0gis0/bookbuyer
-docker run -d --name bookthief -p 8082:4001 --network bookstore-net 0gis0/bookthief
-
 ##################################
-# Deploy this application in AKS #
+# Deploy demo application in AKS #
 ##################################
-
-# Publish images in Docker Hub
-docker push 0gis0/bookstore
-docker push 0gis0/bookbuyer
-docker push 0gis0/bookthief
 
 # Deploy manifests in AKS/K8s cluster
 kubectl apply -f manifests/.
@@ -81,8 +56,15 @@ OSM_VERSION=v1.2.3
 # macOS curl command only
 curl -sL "https://github.com/openservicemesh/osm/releases/download/$OSM_VERSION/osm-$OSM_VERSION-darwin-amd64.tar.gz" | tar -vxzf -
 
+# arm
+curl -sL "https://github.com/openservicemesh/osm/releases/download/$OSM_VERSION/osm-$OSM_VERSION-darwin-arm64.tar.gz" | tar -vxzf -
+
+
 # move the osm binary to your PATH
 sudo mv ./darwin-amd64/osm /usr/local/bin/osm
+
+# move the osm binary to your PATH - arm
+sudo mv ./darwin-arm64/osm /usr/local/bin/osm
 
 osm version
 
@@ -105,14 +87,14 @@ kubectl get pods -n bookstore
 kubectl get pods -n bookbuyer
 kubectl get pods -n bookthief
 
-kubectl describe pod -n bookstore 
+kubectl describe pod -n bookstore
 
 # We lost access from outside. We have to configure a Ingress Controller
 
 # Configure nginx ingress controller
 kubectl create ns ingress-nginx
-# osm namespace add ingress-nginx
-osm namespace add ingress-nginx
+# osm needs to monitor this namespace but not inject the sidecar
+osm namespace add ingress-nginx --disable-sidecar-injection
 # add ingress nginx helm repo
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo update
@@ -120,20 +102,170 @@ helm install osm-nginx-ingess ingress-nginx/ingress-nginx --namespace ingress-ng
 
 # Get nginx ingress controller public IP
 INGRESS_PUBLIC_IP=$(kubectl get svc -n ingress-nginx osm-nginx-ingess-ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+NGINX_INGRESS_NS=ingress-nginx # replace <nginx-namespace> with the namespace where Nginx is installed
+NGINX_INGRESS_SVC=osm-nginx-ingess-ingress-nginx-controller # replace <nginx-ingress-controller-service> with the name of the nginx ingress controller service
 
-# Create a ingress rules and ingress backends
-kubectl apply -f ingress/.
+#### Bookstore ingress and ingress backend ####
+
+kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bookstore-ingress
+  namespace: bookstore
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    # - host: bookstore.$INGRESS_PUBLIC_IP.nip.io
+     - http:
+        paths:
+          - path: /bookstore
+            pathType: Prefix
+            backend:
+              service:
+                name: bookstore
+                port:
+                  number: 80
+
+---
+kind: IngressBackend
+apiVersion: policy.openservicemesh.io/v1alpha1
+metadata:
+  name: bookstore-external-access
+  namespace: bookstore
+spec:
+  backends:
+    - name: bookstore
+      port:
+        number: 3000 # targetPort of the service
+        protocol: http
+  sources:
+    - kind: Service
+      name: $NGINX_INGRESS_SVC
+      namespace: $NGINX_INGRESS_NS
+EOF
+
+
+#### Bookbuyer ingress and ingress backend ####
+
+kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bookbuyer-ingress
+  namespace: bookbuyer
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    # - host: bookbuyer.$INGRESS_PUBLIC_IP.nip.io
+    - http:
+        paths:
+          - path: /bookbuyer
+            pathType: Prefix
+            backend:
+              service:
+                name: bookbuyer
+                port:
+                  number: 80
+
+---
+kind: IngressBackend
+apiVersion: policy.openservicemesh.io/v1alpha1
+metadata:
+  name: bookbuyer-external-access
+  namespace: bookbuyer
+spec:
+  backends:
+    - name: bookbuyer
+      port:
+        number: 4000 # targetPort of the service
+        protocol: http
+  sources:
+    - kind: Service
+      name: $NGINX_INGRESS_SVC
+      namespace: $NGINX_INGRESS_NS
+
+EOF
+
+
+#### Bookthief ingress and ingress backend ####
+
+kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bookthief-ingress
+  namespace: bookthief
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: bookthief.$INGRESS_PUBLIC_IP.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bookthief
+                port:
+                  number: 80
+
+---
+kind: IngressBackend
+apiVersion: policy.openservicemesh.io/v1alpha1
+metadata:
+  name: bookthief-external-access
+  namespace: bookthief
+spec:
+  backends:
+    - name: bookthief
+      port:
+        number: 4001 # targetPort of the service
+        protocol: http
+  sources:
+    - kind: Service
+      name: $NGINX_INGRESS_SVC
+      namespace: $NGINX_INGRESS_NS
+
+EOF
 
 kubectl get ingressbackend -n bookstore
 kubectl describe ingressbackend -n bookstore
 
+kubectl get ingress --all-namespaces
+
+osm verify ingress --from-service ingress-nginx/osm-nginx-ingess-ingress-nginx-controller \
+--to-pod bookthief/bookthief-74b9695487-8l4bp \
+--to-service bookthief \
+--ingress-backend bookthief-external-access --to-port 4001 \
+--osm-namespace kube-system
+
+osm verify ingress --from-service ingress-nginx/osm-nginx-ingess-ingress-nginx-controller \
+--to-pod bookstore/bookstore-56bcf44d57-njjqv \
+--to-service bookstore/bookstore \
+--ingress-backend bookstore-external-access --to-port 3000 \
+--osm-namespace kube-system
+
 # Now you can access using this URLs
 cat <<EOF
-http://bookstore.$INGRESS_PUBLIC_IP.nip.io/
-http://bookbuyer.$INGRESS_PUBLIC_IP.nip.io/
-http://bookthief.$INGRESS_PUBLIC_IP.nip.io/
+
+http://$INGRESS_PUBLIC_IP/bookstore
+http://$INGRESS_PUBLIC_IP/bookbuyer
+http://$INGRESS_PUBLIC_IP/bookthief
 
 EOF
+
+# Check errors
+kubectl logs -n kube-system $(kubectl get pod -n kube-system -l app=osm-controller -o jsonpath='{.items[0].metadata.name}') | grep error
 
 # Check permissive mode
 kubectl get meshconfig osm-mesh-config -n kube-system -o jsonpath='{.spec.traffic.enablePermissiveTrafficPolicyMode}{"\n"}'
