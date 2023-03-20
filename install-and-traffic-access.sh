@@ -98,12 +98,14 @@ osm namespace add ingress-nginx --disable-sidecar-injection
 # add ingress nginx helm repo
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo update
-helm install osm-nginx-ingess ingress-nginx/ingress-nginx --namespace ingress-nginx
+helm install nginx-ingress ingress-nginx/ingress-nginx \
+ --namespace ingress-nginx \
+ --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz
 
 # Get nginx ingress controller public IP
-INGRESS_PUBLIC_IP=$(kubectl get svc -n ingress-nginx osm-nginx-ingess-ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+INGRESS_PUBLIC_IP=$(kubectl get svc -n ingress-nginx nginx-ingress-ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 NGINX_INGRESS_NS=ingress-nginx # replace <nginx-namespace> with the namespace where Nginx is installed
-NGINX_INGRESS_SVC=osm-nginx-ingess-ingress-nginx-controller # replace <nginx-ingress-controller-service> with the name of the nginx ingress controller service
+NGINX_INGRESS_SVC=nginx-ingress-ingress-nginx-controller  # replace <nginx-ingress-controller-service> with the name of the nginx ingress controller service
 
 #### Bookstore ingress and ingress backend ####
 
@@ -114,15 +116,15 @@ metadata:
   name: bookstore-ingress
   namespace: bookstore
   annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
-  ingressClassName: nginx
   rules:
-    # - host: bookstore.$INGRESS_PUBLIC_IP.nip.io
-     - http:
+    - host: bookstore.$INGRESS_PUBLIC_IP.nip.io
+      http:
         paths:
-          - path: /bookstore
+          - path: /
             pathType: Prefix
             backend:
               service:
@@ -155,18 +157,18 @@ kubectl apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: bookbuyer-ingress
+  name: osm-ingress
   namespace: bookbuyer
   annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
-  ingressClassName: nginx
   rules:
-    # - host: bookbuyer.$INGRESS_PUBLIC_IP.nip.io
-    - http:
+    - host: bookbuyer.$INGRESS_PUBLIC_IP.nip.io
+      http:
         paths:
-          - path: /bookbuyer
+          - path: /
             pathType: Prefix
             backend:
               service:
@@ -203,10 +205,10 @@ metadata:
   name: bookthief-ingress
   namespace: bookthief
   annotations:
-    kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    kubernetes.io/ingress.class: nginx
 spec:
-  ingressClassName: nginx
   rules:
     - host: bookthief.$INGRESS_PUBLIC_IP.nip.io
       http:
@@ -243,8 +245,8 @@ kubectl describe ingressbackend -n bookstore
 
 kubectl get ingress --all-namespaces
 
-osm verify ingress --from-service ingress-nginx/osm-nginx-ingess-ingress-nginx-controller \
---to-pod bookthief/bookthief-74b9695487-8l4bp \
+osm verify ingress --from-service $NGINX_INGRESS_NS/$NGINX_INGRESS_SVC \
+--to-pod bookthief/$(kubectl get pod ) \
 --to-service bookthief \
 --ingress-backend bookthief-external-access --to-port 4001 \
 --osm-namespace kube-system
