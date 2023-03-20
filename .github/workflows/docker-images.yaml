@@ -23,16 +23,16 @@ jobs:
         with:         
           context: bookstore/         
           push: true
-          tags: docker.pkg.github.com/0gis0/osm-aks-addon/bookstore:${{ steps.vars.outputs.tag }}
+          tags: ghcr.io/0gis0/osm-aks-addon/bookstore:${{ steps.vars.outputs.tag }}
       - name: Bookbuyer docker image
         uses: docker/build-push-action@v2
         with:         
           context: bookbuyer/         
           push: true
-          tags: docker.pkg.github.com/0gis0/osm-aks-addon/bookbuyer:${{ steps.vars.outputs.tag }}
+          tags: ghcr.io/0gis0/osm-aks-addon/bookbuyer:${{ steps.vars.outputs.tag }}
       - name: Bookthief docker image
         uses: docker/build-push-action@v2
         with:         
           context: bookthief/         
           push: true
-          tags: docker.pkg.github.com/0gis0/osm-aks-addon/bookthief:${{ steps.vars.outputs.tag }}
+          tags: ghcr.io/0gis0/osm-aks-addon/bookthief:${{ steps.vars.outputs.tag }}
