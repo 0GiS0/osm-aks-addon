@@ -51,7 +51,7 @@ metadata:
   labels:
     app: bookthief
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   ports:
   - port: 80
     targetPort: 4001

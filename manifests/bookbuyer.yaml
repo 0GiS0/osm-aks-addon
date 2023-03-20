@@ -50,7 +50,7 @@ metadata:
   labels:
     app: bookbuyer
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   ports:
     - port: 80
       targetPort: 4000

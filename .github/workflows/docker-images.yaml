@@ -19,19 +19,19 @@ jobs:
         id: vars
         run: echo ::set-output name=tag::$(echo ${GITHUB_SHA::7})
       - name: Bookstore docker image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:         
           context: bookstore/         
           push: true
           tags: ghcr.io/0gis0/osm-aks-addon/bookstore:${{ steps.vars.outputs.tag }}
       - name: Bookbuyer docker image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:         
           context: bookbuyer/         
           push: true
           tags: ghcr.io/0gis0/osm-aks-addon/bookbuyer:${{ steps.vars.outputs.tag }}
       - name: Bookthief docker image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:         
           context: bookthief/         
           push: true
