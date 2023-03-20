@@ -5,7 +5,10 @@ on:
     branches: [main]
 
 jobs:
-  build:   
+  build-and-push-images:
+    permissions:
+      contents: read
+      packages: write   
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
